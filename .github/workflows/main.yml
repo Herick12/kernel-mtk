@@ -14,7 +14,15 @@ jobs:
       - name: Instalar Dependências de Compilação do Ubuntu
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm git libncurses5-dev
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm git libncurses5-dev ccache
+
+      - name: Configurar Cache do Compilador (Acelerar Compilação)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-kernel-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-ccache-
 
       - name: Injetar Configurações exigidas pelo Droidspaces
         run: |
@@ -38,15 +46,17 @@ jobs:
 
       - name: Compilar o Kernel Linux
         run: |
+          # Ativa o ccache para reaproveitar arquivos já compilados
+          export CC="ccache clang"
+          
           # Configura a base GKI
-          make O=out ARCH=arm64 CC=clang LD=ld.lld gki_defconfig
+          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld gki_defconfig
           
           # Inicia a compilação utilizando as ferramentas nativas e ignorando travas de ABI do Android
-          make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j$(nproc)
+          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j$(nproc)
 
       - name: Compactar e Disponibilizar o Kernel Gerado
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Android14-Droidspaces
           path: out/arch/arm64/boot/Image.gz
-          
