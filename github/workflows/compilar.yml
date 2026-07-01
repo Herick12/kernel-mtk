@@ -1,0 +1,52 @@
+name: Compilar Kernel Android 14 com Namespaces
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar o Código-Fonte do Kernel
+        uses: actions/checkout@v4
+
+      - name: Instalar Dependências de Compilação do Ubuntu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm git libncurses5-dev
+
+      - name: Injetar Configurações exigidas pelo Droidspaces
+        run: |
+          TARGET_PATH="arch/arm64/configs/gki_defconfig"
+          
+          if [ ! -f "$TARGET_PATH" ]; then
+            echo "ERRO: O arquivo gki_defconfig não foi encontrado!"
+            exit 1
+          fi
+
+          echo "" >> $TARGET_PATH
+          echo "# Configurações injetadas para suporte ao Droidspaces" >> $TARGET_PATH
+          echo "CONFIG_NAMESPACES=y" >> $TARGET_PATH
+          echo "CONFIG_PID_NS=y" >> $TARGET_PATH
+          echo "CONFIG_IPC_NS=y" >> $TARGET_PATH
+          echo "CONFIG_DEVTMPFS=y" >> $TARGET_PATH
+          echo "CONFIG_DEVTMPFS_MOUNT=y" >> $TARGET_PATH
+          
+          echo "Sucesso! As flags foram injetadas no gki_defconfig:"
+          tail -n 10 $TARGET_PATH
+
+      - name: Compilar o Kernel Linux
+        run: |
+          # Configura a base GKI
+          make O=out ARCH=arm64 CC=clang LD=ld.lld gki_defconfig
+          
+          # Inicia a compilação utilizando as ferramentas nativas do sistema
+          make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip -j$(nproc)
+
+      - name: Compactar e Disponibilizar o Kernel Gerado
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Android14-Droidspaces
+          path: out/arch/arm64/boot/Image.gz
+          
