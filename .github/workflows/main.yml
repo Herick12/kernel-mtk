@@ -52,11 +52,12 @@ jobs:
           # Configura a base GKI
           make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld gki_defconfig
           
-          # Inicia a compilação utilizando as ferramentas nativas e ignorando travas de ABI do Android
-          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j$(nproc)
+          # Compila focando direto nos alvos principais para evitar erros nos scripts externos da Motorola
+          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j$(nproc) Image.gz modules
 
       - name: Compactar e Disponibilizar o Kernel Gerado
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Android14-Droidspaces
           path: out/arch/arm64/boot/Image.gz
+          
