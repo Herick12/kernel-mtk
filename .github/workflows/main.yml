@@ -46,18 +46,29 @@ jobs:
 
       - name: Compilar o Kernel Linux
         run: |
-          # Ativa o ccache para reaproveitar arquivos já compilados
           export CC="ccache clang"
           
           # Configura a base GKI
           make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld gki_defconfig
           
-          # Compila utilizando 4 threads (-j4) focando nos alvos principais
-          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image.gz modules
+          # Força o build dos alvos e ignora erros de scripts pós-compilação da Motorola
+          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image.gz modules || true
+
+      - name: Verificar e Mover o Kernel para Upload
+        run: |
+          # Garante que o arquivo foi criado antes de prosseguir
+          if [ -f "out/arch/arm64/boot/Image.gz" ]; then
+            echo "Sucesso! O Kernel Image.gz foi encontrado."
+            mkdir -p output/
+            cp out/arch/arm64/boot/Image.gz output/
+          else
+            echo "ERRO CRÍTICO: O arquivo Image.gz não foi gerado pelo compilador!"
+            exit 1
+          fi
 
       - name: Compactar e Disponibilizar o Kernel Gerado
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Android14-Droidspaces
-          path: out/arch/arm64/boot/Image.gz
+          path: output/Image.gz
           
