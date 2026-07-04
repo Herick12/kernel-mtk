@@ -11,12 +11,12 @@ jobs:
       - name: Baixar o Código-Fonte do Kernel
         uses: actions/checkout@v4
 
-      - name: Instalar Dependências de Compilação do Ubuntu
+      - name: Instalar Dependências do Sistema
         run: |
           sudo apt-get update
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm git libncurses5-dev ccache
 
-      - name: Configurar Cache do Compilador (Acelerar Compilação)
+      - name: Configurar Cache do Compilador
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
@@ -41,28 +41,44 @@ jobs:
           echo "CONFIG_DEVTMPFS=y" >> $TARGET_PATH
           echo "CONFIG_DEVTMPFS_MOUNT=y" >> $TARGET_PATH
           
-          echo "Sucesso! As flags foram injetadas no gki_defconfig:"
+          echo "Sucesso! As flags foram injetadas:"
           tail -n 10 $TARGET_PATH
 
-      - name: Compilar o Kernel Linux
+      - name: Baixar Clang Oficial do Google (AOSP Toolchain)
         run: |
+          mkdir -p android-clang
+          cd android-clang
+          # Baixa a versão estável do Clang utilizada no Android 14 gki
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
+          tar -xf clang-r487747c.tar.gz
+          cd ..
+
+      - name: Compilar o Kernel Linux (Método GKI Direto)
+        run: |
+          export PATH="$GITHUB_WORKSPACE/android-clang/bin:$PATH"
           export CC="ccache clang"
           
-          # Configura a base GKI
-          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld gki_defconfig
+          # Limpa resíduos anteriores
+          make O=out ARCH=arm64 distclean
           
-          # Força o build dos alvos e ignora erros de scripts pós-compilação da Motorola
-          make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image.gz modules || true
+          # Configura a base GKI
+          make O=out ARCH=arm64 CC="ccache clang" CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld gki_defconfig
+          
+          # Tenta gerar o alvo Image puramente (sem compressão externa que costuma quebrar)
+          make O=out ARCH=arm64 CC="ccache clang" CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image || true
 
-      - name: Verificar e Mover o Kernel para Upload
+      - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
-          # Garante que o arquivo foi criado antes de prosseguir
-          if [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            echo "Sucesso! O Kernel Image.gz foi encontrado."
-            mkdir -p output/
+          mkdir -p output/
+          # Verifica se gerou Image bruta ou compactada e prepara para o flash
+          if [ -f "out/arch/arm64/boot/Image" ]; then
+            echo "Sucesso! O Kernel Image bruto foi encontrado. Compactando..."
+            gzip -c out/arch/arm64/boot/Image > output/Image.gz
+          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
+            echo "Sucesso! O Kernel Image.gz já foi gerado compactado."
             cp out/arch/arm64/boot/Image.gz output/
           else
-            echo "ERRO CRÍTICO: O arquivo Image.gz não foi gerado pelo compilador!"
+            echo "ERRO CRÍTICO: O compilador falhou antes de gerar o binário da Image!"
             exit 1
           fi
 
