@@ -44,32 +44,42 @@ jobs:
           echo "Sucesso! As flags foram injetadas:"
           tail -n 10 $TARGET_PATH
 
-      - name: Compilar o Kernel Linux (Usar Clang Interno)
+      - name: Baixar Clang Oficial do Android (AOSP Toolchain Garantida)
+        uses: zyansheep/setup-android-toolchain@v1
+        with:
+          toolchain-version: 'r487747c' # Versão exata para Android 14 GKI
+
+      - name: Compilar o Kernel Linux
         run: |
-          # Define o uso do ccache com o Clang nativo do sistema
-          export CC="ccache clang"
+          # Define o ambiente para usar o Clang do Android recém-instalado
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
           
-          # Limpa resíduos anteriores
-          make O=out ARCH=arm64 distclean
+          # Limpa compilações quebradas anteriores
+          make O=out distclean
           
-          # Configura a base GKI definindo o alvo correto para arquitetura ARM64 do smartphone
-          make O=out ARCH=arm64 CC="ccache clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld gki_defconfig
+          # Configura a base de dados GKI Motorola
+          make O=out gki_defconfig
           
-          # Compila focando no alvo Image puramente com cross-compilation nativo
-          make O=out ARCH=arm64 CC="ccache clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image || true
+          # Compila focando puramente na Image gerando os drivers compatíveis
+          make O=out SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image modules
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
           mkdir -p output/
-          # Verifica onde o binário foi parar e aplica compressão manual se necessário
+          # Varre as pastas possíveis onde o binário do kernel do Android 14 se esconde
           if [ -f "out/arch/arm64/boot/Image" ]; then
-            echo "Sucesso! O Kernel Image bruto foi gerado. Compactando em gzip..."
+            echo "Sucesso! Encontrado em out/arch/arm64/boot/Image"
             gzip -c out/arch/arm64/boot/Image > output/Image.gz
+          elif [ -f "out/Image" ]; then
+            echo "Sucesso! Encontrado na raiz da out"
+            gzip -c out/Image > output/Image.gz
           elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            echo "Sucesso! O Kernel Image.gz já foi gerado de forma compactada."
+            echo "Sucesso! Kernel já compactado pela fabricante"
             cp out/arch/arm64/boot/Image.gz output/
           else
-            echo "ERRO CRÍTICO: O compilador local não gerou o arquivo Image na pasta esperada!"
+            echo "ERRO CRÍTICO: O compilador falhou. Verifique as linhas vermelhas acima no passo anterior!"
             exit 1
           fi
 
@@ -78,4 +88,3 @@ jobs:
         with:
           name: Kernel-Android14-Droidspaces
           path: output/Image.gz
-          
