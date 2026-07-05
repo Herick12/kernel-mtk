@@ -60,7 +60,7 @@ jobs:
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
           
-          # Mantém o ambiente local limpo para ferramentas de host (evita o erro do .relr.dyn)
+          # Mantém o ambiente local limpo para ferramentas de host
           export HOSTCC=gcc
           export HOSTCXX=g++
           export HOSTLD=ld
@@ -74,8 +74,8 @@ jobs:
           # Limpa resíduos anteriores
           make O=out distclean
           
-          # Configura a base de dados GKI
-          make O=out gki_defconfig
+          # Configura a base de dados GKI avisando que estamos usando a estrutura LLVM/Clang (evita procurar pelo gcc)
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
           
           # Compila o Kernel focando na Image bruta e módulos usando os caminhos isolados
           make O=out \
