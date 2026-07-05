@@ -14,7 +14,7 @@ jobs:
       - name: Instalar Dependências do Sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev git libncurses5-dev ccache base-files
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev git libncurses5-dev ccache
 
       - name: Configurar Cache do Compilador
         uses: actions/cache@v4
@@ -44,58 +44,4 @@ jobs:
           echo "Sucesso! As flags foram injetadas:"
           tail -n 10 $TARGET_PATH
 
-      - name: Baixar Proton Clang (Compilador Otimizado e Altamente Compatível)
-        run: |
-          mkdir -p android-clang
-          cd android-clang
-          # Baixa o Proton Clang estável direto do GitHub (altamente confiável para árvores MediaTek/Motorola)
-          curl -LO https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
-          tar -xf master.tar.gz --strip-components=1
-          cd ..
-
-      - name: Compilar o Kernel Linux
-        run: |
-          # Adiciona o novo compilador ao PATH do sistema
-          export PATH="$GITHUB_WORKSPACE/android-clang/bin:$PATH"
-          
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export HEADER_ARCH=arm64
-          export CC="ccache clang"
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-
-          # Limpa compilações anteriores
-          make O=out distclean
-          
-          # Configura a base de dados GKI
-          make O=out gki_defconfig
-          
-          # Compila focando puramente na Image gerando os drivers compatíveis
-          make O=out SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image modules
-
-      - name: Verificar, Comprimir e Mover o Kernel para Upload
-        run: |
-          mkdir -p output/
-          # Varre as pastas possíveis onde o binário do kernel do Android 14 foi gerado
-          if [ -f "out/arch/arm64/boot/Image" ]; then
-            echo "Sucesso! Encontrado em out/arch/arm64/boot/Image"
-            gzip -c out/arch/arm64/boot/Image > output/Image.gz
-          elif [ -f "out/Image" ]; then
-            echo "Sucesso! Encontrado na raiz da out"
-            gzip -c out/Image > output/Image.gz
-          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            echo "Sucesso! Kernel já compactado pela fabricante"
-            cp out/arch/arm64/boot/Image.gz output/
-          else
-            echo "ERRO CRÍTICO: O compilador falhou. Verifique as linhas vermelhas no passo de compilação!"
-            exit 1
-          fi
-
-      - name: Compactar e Disponibilizar o Kernel Gerado
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Android14-Droidspaces
-          path: output/Image.gz
-          
+      - name: Baixar
