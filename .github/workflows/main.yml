@@ -54,22 +54,21 @@ jobs:
 
       - name: Compilar o Kernel Linux
         run: |
-          # Adiciona o novo compilador ao PATH do sistema
-          export PATH="$GITHUB_WORKSPACE/android-clang/bin:$PATH"
+          CLANG_DIR="$GITHUB_WORKSPACE/android-clang/bin"
           
           export ARCH=arm64
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
           
-          # Força scripts locais a usarem as ferramentas nativas do Ubuntu
+          # Mantém o ambiente local limpo para ferramentas de host (evita o erro do .relr.dyn)
           export HOSTCC=gcc
           export HOSTCXX=g++
           export HOSTLD=ld
           
-          # Ferramentas de compilação cruzada para o smartphone
-          export CC="ccache clang"
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          # Passa os caminhos absolutos do Proton Clang direto para o alvo mobile
+          export CC="ccache $CLANG_DIR/clang"
+          export CROSS_COMPILE="$CLANG_DIR/aarch64-linux-gnu-"
+          export CROSS_COMPILE_COMPAT="$CLANG_DIR/arm-linux-gnueabi-"
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
           # Limpa resíduos anteriores
@@ -78,8 +77,18 @@ jobs:
           # Configura a base de dados GKI
           make O=out gki_defconfig
           
-          # Compila o Kernel focando na Image bruta e módulos
-          make O=out SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image modules
+          # Compila o Kernel focando na Image bruta e módulos usando os caminhos isolados
+          make O=out \
+            CC="$CC" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
+            AR="$CLANG_DIR/llvm-ar" \
+            NM="$CLANG_DIR/llvm-nm" \
+            OBJCOPY="$CLANG_DIR/llvm-objcopy" \
+            OBJDUMP="$CLANG_DIR/llvm-objdump" \
+            STRIP="$CLANG_DIR/llvm-strip" \
+            LD="$CLANG_DIR/ld.lld" \
+            SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image modules
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
@@ -103,4 +112,3 @@ jobs:
         with:
           name: Kernel-Android14-Droidspaces
           path: output/Image.gz
-          
