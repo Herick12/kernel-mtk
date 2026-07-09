@@ -71,11 +71,11 @@ jobs:
 
           make O=out distclean
           
-          # Configura e atualiza o defconfig contra perguntas travadas
+          # Configura e atualiza o defconfig
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
-          # COMPILAÇÃO: Adicionado os alvos explicitamente para forçar a criação da Image
+          # COMPILAÇÃO FORÇADA: Alvos explícitos ordenados para gerar o binário vmlinux unificado
           make O=out -j4 \
             CC="$CC" \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -88,36 +88,37 @@ jobs:
             LD="$CLANG_DIR/ld.lld" \
             SKIP_ABI_LINUX=1 \
             STRICT_ALIGNMENT=1 \
-            all modules || true
+            vmlinux modules || true
+
+          # Força a geração manual da Image extraindo-a do vmlinux se o make principal parou antes
+          if [ -f "out/vmlinux" ] && [ ! -f "out/arch/arm64/boot/Image" ]; then
+            echo "Gerando a Image bruta manualmente a partir do vmlinux..."
+            mkdir -p out/arch/arm64/boot/
+            $CLANG_DIR/llvm-objcopy -O binary out/vmlinux out/arch/arm64/boot/Image
+          fi
 
       - name: Escanear Pasta Out (Rastreador de Arquivos)
         run: |
-          echo "=== PROCURANDO POR QUALQUER BINÁRIO DO KERNEL GERADO ==="
+          echo "=== PROCURANDO POR ARQUIVOS GERADOS ==="
           find out/ -name "Image*" -type f || echo "Nenhuma Image encontrada"
-          find out/ -name "vmlinux*" -type f || echo "Nenhum vmlinux encontrado"
+          find out/ -maxdepth 2 -name "vmlinux*" -type f || echo "Nenhum vmlinux encontrado"
           echo "=============================================="
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
           mkdir -p output/
           
-          # Busca avançada por qualquer formato gerado válido
           IMAGE_PATH=$(find out/ -name "Image" -type f -print -quit)
           IMAGE_GZ_PATH=$(find out/ -name "Image.gz" -type f -print -quit)
-          VMLINUX_PATH=$(find out/ -name "vmlinux" -type f -print -quit)
           
           if [ ! -z "$IMAGE_PATH" ]; then
-            echo "Sucesso! Image encontrada. Compactando..."
+            echo "Sucesso! Image encontrada em: $IMAGE_PATH. Compactando..."
             gzip -c "$IMAGE_PATH" > output/Image.gz
           elif [ ! -z "$IMAGE_GZ_PATH" ]; then
-            echo "Sucesso! Image.gz encontrada."
+            echo "Sucesso! Image.gz encontrada em: $IMAGE_GZ_PATH"
             cp "$IMAGE_GZ_PATH" output/Image.gz
-          elif [ ! -z "$VMLINUX_PATH" ]; then
-            echo "Aviso: Gerou vmlinux em vez de Image. Convertendo para Image.gz..."
-            "$GITHUB_WORKSPACE/android-clang/bin/llvm-objcopy" -O binary "$VMLINUX_PATH" out/Image_extracted
-            gzip -c out/Image_extracted > output/Image.gz
           else
-            echo "ERRO CRÍTICO: Nenhum binário de kernel válido foi gerado!"
+            echo "ERRO CRÍTICO: Não foi possível estruturar o binário final do Kernel!"
             exit 1
           fi
 
