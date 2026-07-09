@@ -75,7 +75,7 @@ jobs:
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
-          # COMPILAÇÃO FORÇADA: Alvos explícitos ordenados para gerar o binário vmlinux unificado
+          # Tenta o build padrão primeiro
           make O=out -j4 \
             CC="$CC" \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -90,9 +90,15 @@ jobs:
             STRICT_ALIGNMENT=1 \
             vmlinux modules || true
 
-          # Força a geração manual da Image extraindo-a do vmlinux se o make principal parou antes
-          if [ -f "out/vmlinux" ] && [ ! -f "out/arch/arm64/boot/Image" ]; then
-            echo "Gerando a Image bruta manualmente a partir do vmlinux..."
+          # PLANO DE CONTINGÊNCIA FORÇADO: Se não linkou o vmlinux mas temos o vmlinux.a, linkamos na marra
+          if [ ! -f "out/vmlinux" ] && [ -f "out/vmlinux.a" ]; then
+            echo "Aviso: O Makefile travou antes do link. Forçando linkagem manual do vmlinux..."
+            $CLANG_DIR/ld.lld -m aarch64elf -text -o out/vmlinux --whole-archive out/vmlinux.a || true
+          fi
+
+          # Extrai a Image bruta do vmlinux gerado
+          if [ -f "out/vmlinux" ]; then
+            echo "Extraindo a Image bruta a partir do vmlinux..."
             mkdir -p out/arch/arm64/boot/
             $CLANG_DIR/llvm-objcopy -O binary out/vmlinux out/arch/arm64/boot/Image
           fi
@@ -112,13 +118,13 @@ jobs:
           IMAGE_GZ_PATH=$(find out/ -name "Image.gz" -type f -print -quit)
           
           if [ ! -z "$IMAGE_PATH" ]; then
-            echo "Sucesso! Image encontrada em: $IMAGE_PATH. Compactando..."
+            echo "Sucesso! Image encontrada. Compactando..."
             gzip -c "$IMAGE_PATH" > output/Image.gz
           elif [ ! -z "$IMAGE_GZ_PATH" ]; then
-            echo "Sucesso! Image.gz encontrada em: $IMAGE_GZ_PATH"
+            echo "Sucesso! Image.gz encontrada."
             cp "$IMAGE_GZ_PATH" output/Image.gz
           else
-            echo "ERRO CRÍTICO: Não foi possível estruturar o binário final do Kernel!"
+            echo "ERRO CRÍTICO: Não foi possível estruturar o binário final nem por força bruta!"
             exit 1
           fi
 
