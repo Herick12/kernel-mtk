@@ -77,7 +77,7 @@ jobs:
           # Configura a base de dados GKI com Clang
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
           
-          # Compila o Kernel e ignora erros cosméticos de scripts pós-build pós-módulos
+          # Compila o Kernel forcando apenas o alvo Image bruto e módulos
           make O=out \
             CC="$CC" \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -88,28 +88,5 @@ jobs:
             OBJDUMP="$CLANG_DIR/llvm-objdump" \
             STRIP="$CLANG_DIR/llvm-strip" \
             LD="$CLANG_DIR/ld.lld" \
-            SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1 -j4 Image modules || true
-
-      - name: Verificar, Comprimir e Mover o Kernel para Upload
-        run: |
-          mkdir -p output/
-          # Procura a Image gerada nas pastas do build
-          if [ -f "out/arch/arm64/boot/Image" ]; then
-            echo "Sucesso! Encontrado em out/arch/arm64/boot/Image. Compactando em gzip..."
-            gzip -c out/arch/arm64/boot/Image > output/Image.gz
-          elif [ -f "out/Image" ]; then
-            echo "Sucesso! Encontrado na raiz da out. Compactando em gzip..."
-            gzip -c out/Image > output/Image.gz
-          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            echo "Sucesso! Kernel já compactado pela fabricante."
-            cp out/arch/arm64/boot/Image.gz output/
-          else
-            echo "ERRO CRÍTICO: O arquivo Image não foi encontrado em nenhum diretório esperado!"
-            exit 1
-          fi
-
-      - name: Compactar e Disponibilizar o Kernel Gerado
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Android14-Droidspaces
-          path: output/Image.gz
+            SKIP
+            
