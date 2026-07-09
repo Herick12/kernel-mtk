@@ -60,27 +60,22 @@ jobs:
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
           
-          # Mantém o ambiente local limpo para ferramentas de host
           export HOSTCC=gcc
           export HOSTCXX=g++
           export HOSTLD=ld
           
-          # Configura variáveis do compilador
           export CC="ccache $CLANG_DIR/clang"
           export CROSS_COMPILE="$CLANG_DIR/aarch64-linux-gnu-"
           export CROSS_COMPILE_COMPAT="$CLANG_DIR/arm-linux-gnueabi-"
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # Limpa resíduos anteriores
           make O=out distclean
           
-          # 1. Gera a configuração inicial baseada no defconfig modificado
+          # Configura e atualiza o defconfig contra perguntas travadas
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
-          
-          # 2. Força o preenchimento automático das respostas novas com o padrão do Kernel (evita travar no terminal)
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
-          # 3. Compila o Kernel focando na Image e nos módulos de forma não interativa
+          # COMPILAÇÃO: Adicionado os alvos explicitamente para forçar a criação da Image
           make O=out -j4 \
             CC="$CC" \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -93,29 +88,36 @@ jobs:
             LD="$CLANG_DIR/ld.lld" \
             SKIP_ABI_LINUX=1 \
             STRICT_ALIGNMENT=1 \
-            Image modules || true
+            all modules || true
 
       - name: Escanear Pasta Out (Rastreador de Arquivos)
         run: |
-          echo "=== PROCURANDO POR ARQUIVOS 'Image' GERADOS ==="
-          find out/ -name "Image*" -type f || echo "Nenhum arquivo Image encontrado"
+          echo "=== PROCURANDO POR QUALQUER BINÁRIO DO KERNEL GERADO ==="
+          find out/ -name "Image*" -type f || echo "Nenhuma Image encontrada"
+          find out/ -name "vmlinux*" -type f || echo "Nenhum vmlinux encontrado"
           echo "=============================================="
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
           mkdir -p output/
           
+          # Busca avançada por qualquer formato gerado válido
           IMAGE_PATH=$(find out/ -name "Image" -type f -print -quit)
           IMAGE_GZ_PATH=$(find out/ -name "Image.gz" -type f -print -quit)
+          VMLINUX_PATH=$(find out/ -name "vmlinux" -type f -print -quit)
           
           if [ ! -z "$IMAGE_PATH" ]; then
-            echo "Sucesso! Encontrado em: $IMAGE_PATH. Compactando em gzip..."
+            echo "Sucesso! Image encontrada. Compactando..."
             gzip -c "$IMAGE_PATH" > output/Image.gz
           elif [ ! -z "$IMAGE_GZ_PATH" ]; then
-            echo "Sucesso! Encontrado já compactado em: $IMAGE_GZ_PATH"
+            echo "Sucesso! Image.gz encontrada."
             cp "$IMAGE_GZ_PATH" output/Image.gz
+          elif [ ! -z "$VMLINUX_PATH" ]; then
+            echo "Aviso: Gerou vmlinux em vez de Image. Convertendo para Image.gz..."
+            "$GITHUB_WORKSPACE/android-clang/bin/llvm-objcopy" -O binary "$VMLINUX_PATH" out/Image_extracted
+            gzip -c out/Image_extracted > output/Image.gz
           else
-            echo "ERRO CRÍTICO: O arquivo Image realmente não foi gerado pelo compilador!"
+            echo "ERRO CRÍTICO: Nenhum binário de kernel válido foi gerado!"
             exit 1
           fi
 
