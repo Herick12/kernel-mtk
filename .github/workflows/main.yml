@@ -52,14 +52,13 @@ jobs:
           tar -xf master.tar.gz --strip-components=1
           cd ..
 
-      - name: Compilar o Kernel Linux
+      - name: Compilar via Script Oficial da Fabricante
         run: |
           CLANG_DIR="$GITHUB_WORKSPACE/android-clang/bin"
           
           export ARCH=arm64
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
-          
           export HOSTCC=gcc
           export HOSTCXX=g++
           export HOSTLD=ld
@@ -69,62 +68,44 @@ jobs:
           export CROSS_COMPILE_COMPAT="$CLANG_DIR/arm-linux-gnueabi-"
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          make O=out distclean
-          
-          # Configura e atualiza o defconfig
-          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
-          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
-          
-          # Tenta o build padrão primeiro
-          make O=out -j4 \
-            CC="$CC" \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
-            AR="$CLANG_DIR/llvm-ar" \
-            NM="$CLANG_DIR/llvm-nm" \
-            OBJCOPY="$CLANG_DIR/llvm-objcopy" \
-            OBJDUMP="$CLANG_DIR/llvm-objdump" \
-            STRIP="$CLANG_DIR/llvm-strip" \
-            LD="$CLANG_DIR/ld.lld" \
-            SKIP_ABI_LINUX=1 \
-            STRICT_ALIGNMENT=1 \
-            vmlinux modules || true
+          # Procura de forma inteligente por scripts de automação de compilação no repositório
+          SCRIPT_BUILD=$(find . -maxdepth 2 -name "build.sh" -o -name "*build*.sh" -type f -print -quit)
 
-          # PLANO DE CONTINGÊNCIA FORÇADO: Se não linkou o vmlinux mas temos o vmlinux.a, linkamos na marra
-          if [ ! -f "out/vmlinux" ] && [ -f "out/vmlinux.a" ]; then
-            echo "Aviso: O Makefile travou antes do link. Forçando linkagem manual do vmlinux..."
-            $CLANG_DIR/ld.lld -m aarch64elf -text -o out/vmlinux --whole-archive out/vmlinux.a || true
+          if [ ! -z "$SCRIPT_BUILD" ]; then
+            echo "Script oficial encontrado em: $SCRIPT_BUILD. Iniciando compilação guiada..."
+            chmod +x "$SCRIPT_BUILD"
+            # Executa o script oficial passando o arquivo de saída out
+            ./$SCRIPT_BUILD gki_defconfig || true
+          else
+            echo "Nenhum script wrapper (.sh) encontrado na raiz. Forçando make unificado clássico..."
+            make O=out distclean
+            make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
+            make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+            make O=out -j4 CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" CLANG_TRIPLE="$CLANG_TRIPLE" SKIP_ABI_LINUX=1 STRICT_ALIGNMENT=1
           fi
 
-          # Extrai a Image bruta do vmlinux gerado
-          if [ -f "out/vmlinux" ]; then
-            echo "Extraindo a Image bruta a partir do vmlinux..."
-            mkdir -p out/arch/arm64/boot/
-            $CLANG_DIR/llvm-objcopy -O binary out/vmlinux out/arch/arm64/boot/Image
-          fi
-
-      - name: Escanear Pasta Out (Rastreador de Arquivos)
+      - name: Escanear Pasta Out (Rastreador Avançado)
         run: |
-          echo "=== PROCURANDO POR ARQUIVOS GERADOS ==="
-          find out/ -name "Image*" -type f || echo "Nenhuma Image encontrada"
-          find out/ -maxdepth 2 -name "vmlinux*" -type f || echo "Nenhum vmlinux encontrado"
+          echo "=== PROCURANDO POR ARQUIVOS BRUTOS GERADOS ==="
+          find . -name "Image*" -type f || echo "Nenhuma Image encontrada"
+          find . -name "vmlinux" -type f || echo "Nenhum vmlinux unificado encontrado"
           echo "=============================================="
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
           mkdir -p output/
           
-          IMAGE_PATH=$(find out/ -name "Image" -type f -print -quit)
-          IMAGE_GZ_PATH=$(find out/ -name "Image.gz" -type f -print -quit)
+          IMAGE_PATH=$(find . -name "Image" -not -path "./android-clang/*" -type f -print -quit)
+          IMAGE_GZ_PATH=$(find . -name "Image.gz" -not -path "./android-clang/*" -type f -print -quit)
           
           if [ ! -z "$IMAGE_PATH" ]; then
-            echo "Sucesso! Image encontrada. Compactando..."
+            echo "Sucesso absoluto! Image encontrada em: $IMAGE_PATH. Compactando..."
             gzip -c "$IMAGE_PATH" > output/Image.gz
           elif [ ! -z "$IMAGE_GZ_PATH" ]; then
-            echo "Sucesso! Image.gz encontrada."
+            echo "Sucesso absoluto! Image.gz oficial encontrada em: $IMAGE_GZ_PATH"
             cp "$IMAGE_GZ_PATH" output/Image.gz
           else
-            echo "ERRO CRÍTICO: Não foi possível estruturar o binário final nem por força bruta!"
+            echo "ERRO CRÍTICO: Não foi possível estruturar o binário final do Kernel!"
             exit 1
           fi
 
@@ -133,4 +114,3 @@ jobs:
         with:
           name: Kernel-Android14-Droidspaces
           path: output/Image.gz
-          
