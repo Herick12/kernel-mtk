@@ -14,8 +14,7 @@ jobs:
       - name: Instalar Dependências do Sistema
         run: |
           sudo apt-get update
-          # Adicionado o pacote 'dwarves' que fornece o 'pahole' exigido pelo BTF
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev git libncurses5-dev ccache rsync dwarves
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev git libncurses5-dev ccache rsync
 
       - name: Configurar Cache do Compilador
         uses: actions/cache@v4
@@ -25,7 +24,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-kernel-ccache-
 
-      - name: Injetar Configurações (Droidspaces e Correções de Build)
+      - name: Injetar Configurações (Droidspaces e Pré-configuração)
         run: |
           TARGET_PATH="arch/arm64/configs/gki_defconfig"
           
@@ -42,11 +41,8 @@ jobs:
             echo "CONFIG_DEVTMPFS=y" >> "$TARGET_PATH"
             echo "CONFIG_DEVTMPFS_MOUNT=y" >> "$TARGET_PATH"
             
-            echo "# Desativando BTF para evitar quebras por falta de ferramentas de debug" >> "$TARGET_PATH"
-            echo "CONFIG_DEBUG_INFO_BTF=n" >> "$TARGET_PATH"
-            
-            echo "Flags injetadas com sucesso em: $TARGET_PATH"
-            tail -n 12 "$TARGET_PATH"
+            echo "Flags iniciais injetadas com sucesso em: $TARGET_PATH"
+            tail -n 10 "$TARGET_PATH"
           fi
 
       - name: Baixar Proton Clang (Compilador Otimizado)
@@ -74,16 +70,21 @@ jobs:
           export CROSS_COMPILE="$CLANG_DIR/aarch64-linux-gnu-"
           export CROSS_COMPILE_COMPAT="$CLANG_DIR/arm-linux-gnueabi-"
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          
-          # Garante que o gerador de defconfig use o mesmo LLVM/Linker para não corromper as regras
-          export DEF_ARGS="CC=$CC CROSS_COMPILE=$CROSS_COMPILE AR=$CLANG_DIR/llvm-ar LD=$CLANG_DIR/ld.lld"
 
-          # Limpa resíduos de builds anteriores
-          make O=out distclean
+          # Cria a pasta de saída explicitamente antes do build
+          mkdir -p out
+
+          # Configura a base de dados GKI de forma limpa e direta
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
           
-          # Configura a base de dados GKI de forma segura usando o herramental correto
-          make O=out $DEF_ARGS gki_defconfig
-          make O=out $DEF_ARGS olddefconfig
+          # Desativa o BTF usando a ferramenta nativa de script do próprio Kernel
+          if [ -f "out/.config" ]; then
+            echo "Forçando desativação do BTF via script/config..."
+            ./scripts/config --file out/.config --disable CONFIG_DEBUG_INFO_BTF
+          fi
+          
+          # Atualiza e valida o arquivo de configuração final
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
           # Compila a Image ligando tudo com as ferramentas LLVM dedicadas
           make O=out -j4 \
