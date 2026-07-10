@@ -11,7 +11,7 @@ jobs:
       - name: Baixar o Código-Fonte do Kernel
         uses: actions/checkout@v4
 
-      - name: Instalar Dependências Básicas do Sistema
+      - name: Instalar Dependências do Sistema
         run: |
           sudo apt-get update
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev git libncurses5-dev ccache rsync
@@ -29,7 +29,6 @@ jobs:
           TARGET_PATH="arch/arm64/configs/gki_defconfig"
           
           if [ ! -f "$TARGET_PATH" ]; then
-            echo "Aviso: gki_defconfig não encontrado na raiz, procurando em subpastas..."
             TARGET_PATH=$(find . -name "gki_defconfig" -type f -print -quit)
           fi
 
@@ -43,8 +42,6 @@ jobs:
             echo "CONFIG_DEVTMPFS_MOUNT=y" >> "$TARGET_PATH"
             echo "Flags injetadas com sucesso em: $TARGET_PATH"
             tail -n 10 "$TARGET_PATH"
-          else
-            echo "Aviso: Não foi possível injetar as flags estaticamente. Tentando compilação direta."
           fi
 
       - name: Baixar Proton Clang (Compilador Otimizado)
@@ -55,84 +52,69 @@ jobs:
           tar -xf master.tar.gz --strip-components=1
           cd ..
 
-      - name: Compilar via Ecossistema Oficial Android GKI
+      - name: Compilar o Kernel Linux (Make Clássico Isolado)
         run: |
           CLANG_DIR="$GITHUB_WORKSPACE/android-clang/bin"
           
-          # Injeta o compilador de forma limpa no PATH apenas para o ambiente do script wrapper
-          export PATH="$CLANG_DIR:$PATH"
+          # NÃO ADICIONAMOS O CLANG NO PATH GLOBAL!
+          # Mantém o ecossistema do host Ubuntu intacto para compilar o 'fixdep'
           export ARCH=arm64
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
           
-          # Variáveis necessárias para os wrappers oficiais da Motorola/MediaTek
-          export CC="clang"
-          export CROSS_COMPILE="aarch64-linux-gnu-"
-          export CROSS_COMPILE_COMPAT="arm-linux-gnueabi-"
-          export CLANG_TRIPLE="aarch64-linux-gnu-"
-          export LD_LIBRARY_PATH="$CLANG_DIR/../lib:$LD_LIBRARY_PATH"
+          export HOSTCC=gcc
+          export HOSTCXX=g++
+          export HOSTLD=ld
           
-          # Desativa validações estritas de ABI que quebram o build em repositórios customizados
-          export SKIP_ABI_LINUX=1
-          export SKIP_MRPROPER=1
-          export STRICT_ALIGNMENT=1
-          
-          # Configura diretórios padrões usados pelo script build.sh do ecossistema Google/MTK
-          export OUT_DIR="$GITHUB_WORKSPACE/out"
-          export DIST_DIR="$GITHUB_WORKSPACE/out/dist"
+          # Define os caminhos absolutos para o compilador do celular
+          export CC="ccache $CLANG_DIR/clang"
+          export CROSS_COMPILE="$CLANG_DIR/aarch64-linux-gnu-"
+          export CROSS_COMPILE_COMPAT="$CLANG_DIR/arm-linux-gnueabi-"
+          export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # 1. TENTATIVA COM BAZEL / KLEAF (Padrão Android 14 Oficial)
-          if [ -f "tools/bazel" ] || [ -f "prebuilts/kernel-build-tools/linux-x86/bin/bazel" ]; then
-            echo "Detectado ecossistema Kleaf (Bazel). Iniciando build oficial..."
-            # Procura o alvo gki no arquivo build.config
-            ./tools/bazel build //common:kernel_aarch64_dist --skip_abi || true
+          # Limpa resíduos de builds anteriores
+          make O=out distclean
           
-          # 2. TENTATIVA COM SCRIPT WRAPPER (Padrão MediaTek/Motorola Customizado)
-          elif [ -f "build/build.sh" ]; then
-            echo "Detectado script oficial em build/build.sh. Iniciando compilação..."
-            chmod +x build/build.sh
-            BUILD_CONFIG=build.config.gki.aarch64 ./build/build.sh || true
+          # Configura a base de dados GKI de forma segura
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
-          elif [ -f "build.sh" ]; then
-            echo "Detectado script oficial na raiz. Iniciando compilação..."
-            chmod +x build.sh
-            ./build.sh || true
-          
-          # 3. FALLBACK DE FORÇA BRUTA (Se nenhum script oficial existir, força os alvos atômicos do Makefile)
-          else
-            echo "Nenhum script wrapper detectado. Forçando linkagem explícita via Make clássico..."
-            export HOSTCC=gcc
-            export HOSTCXX=g++
-            export HOSTLD=ld
-            make O=out CC="ccache clang" CROSS_COMPILE="aarch64-linux-gnu-" gki_defconfig
-            make O=out CC="ccache clang" CROSS_COMPILE="aarch64-linux-gnu-" olddefconfig
-            # Compila o arquivo bruto diretamente, pulando o alvo 'modules' que está gerando o conflito na raiz
-            make O=out -j4 CC="ccache clang" CROSS_COMPILE="aarch64-linux-gnu-" Image || true
-          fi
+          # Compila APENAS a Image bruta (isolando e pulando os módulos problemáticos)
+          make O=out -j4 \
+            CC="$CC" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
+            AR="$CLANG_DIR/llvm-ar" \
+            NM="$CLANG_DIR/llvm-nm" \
+            OBJCOPY="$CLANG_DIR/llvm-objcopy" \
+            OBJDUMP="$CLANG_DIR/llvm-objdump" \
+            STRIP="$CLANG_DIR/llvm-strip" \
+            LD="$CLANG_DIR/ld.lld" \
+            SKIP_ABI_LINUX=1 \
+            STRICT_ALIGNMENT=1 \
+            Image
 
       - name: Escanear Diretórios por Binários Gerados
         run: |
-          echo "=== VARREDURA COMPLETA DE ARQUIVOS GERADOS ==="
-          find . -name "Image*" -not -path "./android-clang/*" -type f || echo "Nenhuma Image encontrada"
-          find . -name "vmlinux*" -not -path "./android-clang/*" -type f -maxdepth 4 || echo "Nenhum vmlinux encontrado"
+          echo "=== VARREDURA DE ARQUIVOS GERADOS ==="
+          find out/ -name "Image*" -type f || echo "Nenhuma Image encontrada"
           echo "=============================================="
 
       - name: Verificar, Comprimir e Mover o Kernel para Upload
         run: |
           mkdir -p output/
           
-          # Procura dinamicamente onde o script oficial ou o make salvou o binário
-          IMAGE_PATH=$(find . -name "Image" -not -path "./android-clang/*" -type f -print -quit)
-          IMAGE_GZ_PATH=$(find . -name "Image.gz" -not -path "./android-clang/*" -type f -print -quit)
+          IMAGE_PATH=$(find out/ -name "Image" -type f -print -quit)
+          IMAGE_GZ_PATH=$(find out/ -name "Image.gz" -type f -print -quit)
           
           if [ ! -z "$IMAGE_PATH" ]; then
-            echo "Sucesso absoluto! Image encontrada em: $IMAGE_PATH. Compactando..."
+            echo "Sucesso! Image encontrada em: $IMAGE_PATH. Compactando..."
             gzip -c "$IMAGE_PATH" > output/Image.gz
           elif [ ! -z "$IMAGE_GZ_PATH" ]; then
-            echo "Sucesso absoluto! Image.gz encontrada em: $IMAGE_GZ_PATH"
+            echo "Sucesso! Image.gz encontrada em: $IMAGE_GZ_PATH"
             cp "$IMAGE_GZ_PATH" output/Image.gz
           else
-            echo "ERRO CRÍTICO: O binário final não pôde ser estruturado pelos métodos oficiais!"
+            echo "ERRO CRÍTICO: O arquivo Image não pôde ser gerado."
             exit 1
           fi
 
@@ -141,3 +123,4 @@ jobs:
         with:
           name: Kernel-Android14-Droidspaces
           path: output/Image.gz
+          
