@@ -40,14 +40,17 @@ jobs:
           if [ ! -z "$TARGET_PATH" ]; then
             echo "" >> "$TARGET_PATH"
             echo "# Configurações injetadas para suporte ao Droidspaces" >> "$TARGET_PATH"
+            echo "CONFIG_SYSVIPC=y" >> "$TARGET_PATH"
             echo "CONFIG_NAMESPACES=y" >> "$TARGET_PATH"
             echo "CONFIG_PID_NS=y" >> "$TARGET_PATH"
             echo "CONFIG_IPC_NS=y" >> "$TARGET_PATH"
             echo "CONFIG_DEVTMPFS=y" >> "$TARGET_PATH"
             echo "CONFIG_DEVTMPFS_MOUNT=y" >> "$TARGET_PATH"
+            echo "CONFIG_IKCONFIG=y" >> "$TARGET_PATH"
+            echo "CONFIG_IKCONFIG_PROC=y" >> "$TARGET_PATH"
             
             echo "Flags iniciais injetadas com sucesso em: $TARGET_PATH"
-            tail -n 10 "$TARGET_PATH"
+            tail -n 12 "$TARGET_PATH"
           fi
 
       - name: Baixar Proton Clang (Compilador Otimizado)
@@ -89,15 +92,29 @@ jobs:
           # Configura a base de dados GKI de forma limpa e direta
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" "$DEFCONFIG_NAME"
           
-          # Desativa o BTF usando a ferramenta nativa de script do próprio Kernel
           if [ -f "out/.config" ]; then
+            echo "Forçando ativação estrita das flags no .config de saída..."
+            ./scripts/config --file out/.config --enable CONFIG_SYSVIPC
+            ./scripts/config --file out/.config --enable CONFIG_NAMESPACES
+            ./scripts/config --file out/.config --enable CONFIG_PID_NS
+            ./scripts/config --file out/.config --enable CONFIG_IPC_NS
+            ./scripts/config --file out/.config --enable CONFIG_DEVTMPFS
+            ./scripts/config --file out/.config --enable CONFIG_DEVTMPFS_MOUNT
+            ./scripts/config --file out/.config --enable CONFIG_IKCONFIG
+            ./scripts/config --file out/.config --enable CONFIG_IKCONFIG_PROC
+            
             echo "Forçando desativação do BTF via script/config..."
             ./scripts/config --file out/.config --disable CONFIG_DEBUG_INFO_BTF
           fi
           
-          # Atualiza e valida o arquivo de configuração final
+          # Atualiza e valida o arquivo de configuração final (travando as modificações)
           make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
           
+          # Confirmação visual no log do GitHub Actions antes da compilação demorada
+          echo "=== VALIDAÇÃO ANTES DA COMPILAÇÃO ==="
+          grep -E "CONFIG_SYSVIPC|CONFIG_NAMESPACES|CONFIG_PID_NS|CONFIG_IPC_NS|CONFIG_IKCONFIG_PROC" out/.config || true
+          echo "====================================="
+
           # Compila a Image ligando tudo com as ferramentas LLVM dedicadas
           make O=out -j4 \
             CC="$CC" \
