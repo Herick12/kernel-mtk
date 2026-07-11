@@ -10,6 +10,9 @@ jobs:
     steps:
       - name: Baixar o Código-Fonte do Kernel
         uses: actions/checkout@v4
+        with:
+          # FORÇA O DOWNLOAD DA BRANCH DA MOTOROLA COM A BASE 5.10 CORRETA
+          ref: android-13-release-ttt
 
       - name: Instalar Dependências do Sistema
         run: |
@@ -26,10 +29,12 @@ jobs:
 
       - name: Injetar Configurações (Droidspaces e Pré-configuração)
         run: |
+          # Busca dinâmica para abranger o gki_defconfig na raiz ou dentro da pasta vendor/ da branch 5.10
           TARGET_PATH="arch/arm64/configs/gki_defconfig"
-          
-          if [ ! -f "$TARGET_PATH" ]; then
-            TARGET_PATH=$(find . -name "gki_defconfig" -type f -print -quit)
+          if [ -f "arch/arm64/configs/vendor/gki_defconfig" ]; then
+            TARGET_PATH="arch/arm64/configs/vendor/gki_defconfig"
+          elif [ ! -f "$TARGET_PATH" ]; then
+            TARGET_PATH=$(find arch/arm64/configs/ -name "gki_defconfig" -type f -print -quit)
           fi
 
           if [ ! -z "$TARGET_PATH" ]; then
@@ -74,8 +79,15 @@ jobs:
           # Cria a pasta de saída explicitamente antes do build
           mkdir -p out
 
+          # Define o nome curto do defconfig correto para o comando make
+          if [ -f "arch/arm64/configs/vendor/gki_defconfig" ]; then
+            DEFCONFIG_NAME="vendor/gki_defconfig"
+          else
+            DEFCONFIG_NAME="gki_defconfig"
+          fi
+
           # Configura a base de dados GKI de forma limpa e direta
-          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" gki_defconfig
+          make O=out CC="$CC" CROSS_COMPILE="$CROSS_COMPILE" "$DEFCONFIG_NAME"
           
           # Desativa o BTF usando a ferramenta nativa de script do próprio Kernel
           if [ -f "out/.config" ]; then
